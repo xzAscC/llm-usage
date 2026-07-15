@@ -2,8 +2,6 @@
 # Project-local launcher — does not require a global install.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PATH="${ROOT}/.bun/bin:${PATH}"
-
 if command -v bun >/dev/null 2>&1; then
   exec bun "${ROOT}/src/index.ts" "$@"
 fi
