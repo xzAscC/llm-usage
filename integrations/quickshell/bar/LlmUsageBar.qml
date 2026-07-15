@@ -200,7 +200,7 @@ MouseArea {
 
         Row {
             anchors.centerIn: parent
-            spacing: 14
+            spacing: 24
 
             Repeater {
                 model: root.providers
@@ -209,7 +209,8 @@ MouseArea {
                     id: col
                     required property var modelData
                     spacing: 8
-                    width: 160
+                    // Wide enough for "Session 5h: 12% · 4h 30m · 0/4000 calls"
+                    width: 240
 
                     StyledPopupHeaderRow {
                         icon: col.modelData.id === "openai" ? "smart_toy"
