@@ -11,6 +11,11 @@ interface MoneyVal {
   val?: number;
 }
 
+interface GrokProductUsage {
+  product?: string;
+  usagePercent?: number;
+}
+
 interface GrokBillingConfig {
   monthlyLimit?: MoneyVal;
   used?: MoneyVal;
@@ -24,6 +29,7 @@ interface GrokBillingConfig {
     end?: string;
   };
   creditUsagePercent?: number;
+  productUsage?: GrokProductUsage[];
   isUnifiedBillingUser?: boolean;
 }
 
@@ -33,6 +39,14 @@ interface GrokBillingResponse {
 
 interface GrokSettingsResponse {
   subscription_tier_display?: string;
+}
+
+function periodLabel(type?: string): string {
+  if (!type) return "Weekly";
+  if (type.includes("WEEKLY")) return "Weekly";
+  if (type.includes("MONTHLY")) return "Monthly";
+  if (type.includes("DAILY")) return "Daily";
+  return "Period";
 }
 
 export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
@@ -58,9 +72,9 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
 
   try {
     const [billing, settings] = await Promise.all([
-      // Default (no format) returns monthly included allowance — best for monthly subs
+      // Official SuperGrok weekly pool (matches grok.com "每周 SuperGrok 限额")
       fetchJson<GrokBillingResponse>(
-        "https://cli-chat-proxy.grok.com/v1/billing",
+        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
         { headers },
       ),
       fetchJson<GrokSettingsResponse>(
@@ -72,33 +86,21 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
     const cfg = billing.config || {};
     const windows: UsageWindow[] = [];
 
-    const limit = cfg.monthlyLimit?.val;
-    const used = cfg.used?.val;
-    if (limit != null && limit > 0 && used != null) {
-      const usedPercent = clampPercent((used / limit) * 100);
-      const end = cfg.billingPeriodEnd;
-      windows.push({
-        id: "monthly",
-        label: "Monthly",
-        usedPercent,
-        remainingPercent: clampPercent(100 - usedPercent),
-        used,
-        limit,
-        remaining: Math.max(0, limit - used),
-        resetsAt: end,
-        resetAfterSeconds: secondsUntil(end),
-        note: `${used}/${limit} credits`,
-      });
-    } else if (cfg.creditUsagePercent != null) {
+    if (cfg.creditUsagePercent != null) {
       const usedPercent = clampPercent(cfg.creditUsagePercent);
       const end = cfg.currentPeriod?.end || cfg.billingPeriodEnd;
+      const products = (cfg.productUsage || [])
+        .filter((p) => p.product != null && p.usagePercent != null)
+        .map((p) => `${p.product} ${Math.round(p.usagePercent!)}%`)
+        .join(", ");
       windows.push({
-        id: "period",
-        label: "Period",
+        id: "weekly",
+        label: periodLabel(cfg.currentPeriod?.type),
         usedPercent,
         remainingPercent: clampPercent(100 - usedPercent),
         resetsAt: end,
         resetAfterSeconds: secondsUntil(end),
+        note: products || undefined,
       });
     }
 
@@ -115,11 +117,23 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
         limit: odCap,
         remaining: Math.max(0, odCap - odUsed),
       });
-    } else {
+    } else if (cfg.creditUsagePercent != null) {
       windows.push({
         id: "ondemand",
-        label: "On-demand",
-        note: "disabled",
+        label: "Extra credits",
+        note: "US$0 / disabled",
+      });
+    }
+
+    if (windows.length === 0) {
+      return finalizeProvider({
+        id: "xai",
+        name: "Grok / xAI",
+        plan: settings?.subscription_tier_display,
+        ok: false,
+        error: "No weekly SuperGrok usage in billing response",
+        windows: [],
+        fetchedAt: now,
       });
     }
 
@@ -127,7 +141,7 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
       id: "xai",
       name: "Grok / xAI",
       plan: settings?.subscription_tier_display,
-      ok: windows.some((w) => w.usedPercent != null) || windows.length > 0,
+      ok: true,
       windows,
       fetchedAt: now,
     });

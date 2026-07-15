@@ -15,17 +15,23 @@ describe("fetchXai", () => {
     expect(r.error).toMatch(/No xAI OAuth/i);
   });
 
-  test("maps monthly allowance", async () => {
+  test("maps weekly SuperGrok creditUsagePercent (matches grok.com UI)", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/v1/billing") && !url.includes("format=")) {
+      if (url.includes("format=credits")) {
         return new Response(
           JSON.stringify({
             config: {
-              monthlyLimit: { val: 20000 },
-              used: { val: 2000 },
+              currentPeriod: {
+                type: "USAGE_PERIOD_TYPE_WEEKLY",
+                start: "2026-07-12T08:17:27.853505+00:00",
+                end: "2026-07-19T08:17:27.853505+00:00",
+              },
+              creditUsagePercent: 36.0,
+              productUsage: [{ product: "Api", usagePercent: 36.0 }],
               onDemandCap: { val: 0 },
-              billingPeriodEnd: new Date(Date.now() + 86400_000).toISOString(),
+              onDemandUsed: { val: 0 },
+              billingPeriodEnd: "2026-07-19T08:17:27.853505+00:00",
             },
           }),
           { status: 200 },
@@ -46,8 +52,10 @@ describe("fetchXai", () => {
     const r = await fetchXai(auth);
     expect(r.ok).toBe(true);
     expect(r.plan).toBe("X Premium+");
-    expect(r.usedPercent).toBe(10);
-    expect(r.windows.some((w) => w.label === "Monthly")).toBe(true);
+    expect(r.usedPercent).toBe(36);
+    expect(r.windows.some((w) => w.label === "Weekly")).toBe(true);
+    expect(r.windows.some((w) => w.label === "Monthly")).toBe(false);
+    expect(r.windows.find((w) => w.id === "weekly")?.note).toContain("Api 36%");
     expect(JSON.stringify(r)).not.toMatch(/SECRET_XAI_TOKEN/);
   });
 });
