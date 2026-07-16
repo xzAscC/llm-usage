@@ -15,7 +15,7 @@ describe("fetchXai", () => {
     expect(r.error).toMatch(/No xAI OAuth/i);
   });
 
-  test("maps weekly SuperGrok creditUsagePercent", async () => {
+  test("maps weekly SuperGrok only (no monthly)", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("format=credits")) {
@@ -29,18 +29,6 @@ describe("fetchXai", () => {
               creditUsagePercent: 36.0,
               productUsage: [{ product: "Api", usagePercent: 36.0 }],
               onDemandCap: { val: 0 },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/v1/billing") && !url.includes("format=")) {
-        return new Response(
-          JSON.stringify({
-            config: {
-              monthlyLimit: { val: 20000 },
-              used: { val: 2000 },
-              billingPeriodEnd: "2026-08-01T00:00:00+00:00",
             },
           }),
           { status: 200 },
@@ -62,11 +50,11 @@ describe("fetchXai", () => {
     expect(r.ok).toBe(true);
     expect(r.usedPercent).toBe(36);
     expect(r.windows.some((w) => w.label === "Weekly")).toBe(true);
-    expect(r.windows.some((w) => w.label === "Monthly")).toBe(true);
+    expect(r.windows.some((w) => w.label === "Monthly")).toBe(false);
     expect(JSON.stringify(r)).not.toMatch(/SECRET_XAI_TOKEN/);
   });
 
-  test("falls back when weekly percent omitted", async () => {
+  test("weekly period without percent still ok", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("format=credits")) {
@@ -78,18 +66,6 @@ describe("fetchXai", () => {
                 end: "2026-07-19T08:17:27.853505+00:00",
               },
               onDemandCap: { val: 0 },
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.includes("/v1/billing") && !url.includes("format=")) {
-        return new Response(
-          JSON.stringify({
-            config: {
-              monthlyLimit: { val: 20000 },
-              used: { val: 2744 },
-              billingPeriodEnd: "2026-08-01T00:00:00+00:00",
             },
           }),
           { status: 200 },
@@ -110,8 +86,7 @@ describe("fetchXai", () => {
     const r = await fetchXai(auth);
     expect(r.ok).toBe(true);
     expect(r.windows.some((w) => w.label === "Weekly")).toBe(true);
-    expect(r.windows.some((w) => w.label === "Monthly")).toBe(true);
-    const monthly = r.windows.find((w) => w.id === "monthly");
-    expect(monthly?.usedPercent).toBeCloseTo(13.72, 1);
+    expect(r.windows.some((w) => w.label === "Monthly")).toBe(false);
+    expect(r.usedPercent).toBe(0);
   });
 });

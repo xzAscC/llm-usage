@@ -69,10 +69,7 @@ function shortError(err: unknown): string {
   return msg.length > 120 ? msg.slice(0, 120) + "…" : msg;
 }
 
-function windowsFromBilling(
-  weekly: GrokBillingConfig,
-  monthly: GrokBillingConfig,
-): UsageWindow[] {
+function windowsFromBilling(weekly: GrokBillingConfig): UsageWindow[] {
   const windows: UsageWindow[] = [];
 
   const weeklyEnd = weekly.currentPeriod?.end || weekly.billingPeriodEnd;
@@ -103,27 +100,8 @@ function windowsFromBilling(
     });
   }
 
-  const mLimit = monthly.monthlyLimit?.val;
-  const mUsed = monthly.used?.val;
-  if (mLimit != null && mLimit > 0 && mUsed != null) {
-    const usedPercent = clampPercent((mUsed / mLimit) * 100);
-    const end = monthly.billingPeriodEnd;
-    windows.push({
-      id: "monthly",
-      label: "Monthly",
-      usedPercent,
-      remainingPercent: clampPercent(100 - usedPercent),
-      used: mUsed,
-      limit: mLimit,
-      remaining: Math.max(0, mLimit - mUsed),
-      resetsAt: end,
-      resetAfterSeconds: secondsUntil(end),
-      note: `${mUsed}/${mLimit} credits`,
-    });
-  }
-
-  const odCap = (weekly.onDemandCap ?? monthly.onDemandCap)?.val ?? 0;
-  const odUsed = (weekly.onDemandUsed ?? monthly.onDemandUsed)?.val ?? 0;
+  const odCap = weekly.onDemandCap?.val ?? 0;
+  const odUsed = weekly.onDemandUsed?.val ?? 0;
   if (odCap > 0) {
     const usedPercent = clampPercent((odUsed / odCap) * 100);
     windows.push({
@@ -175,13 +153,9 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
   try {
     const fetchAll = async (token: OAuthCredential) => {
       const headers = grokHeaders(token);
-      const [weekly, monthly, settings] = await Promise.all([
+      const [weekly, settings] = await Promise.all([
         fetchJson<GrokBillingResponse>(
           "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-          { headers },
-        ).catch(() => ({ config: {} }) as GrokBillingResponse),
-        fetchJson<GrokBillingResponse>(
-          "https://cli-chat-proxy.grok.com/v1/billing",
           { headers },
         ).catch(() => ({ config: {} }) as GrokBillingResponse),
         fetchJson<GrokSettingsResponse>(
@@ -189,7 +163,7 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
           { headers },
         ).catch(() => null),
       ]);
-      return { weekly, monthly, settings };
+      return { weekly, settings };
     };
 
     let pack: Awaited<ReturnType<typeof fetchAll>>;
@@ -209,10 +183,7 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
       pack = await fetchAll(oauth);
     }
 
-    const windows = windowsFromBilling(
-      pack.weekly.config || {},
-      pack.monthly.config || {},
-    );
+    const windows = windowsFromBilling(pack.weekly.config || {});
 
     if (windows.length === 0) {
       return finalizeProvider({
@@ -220,7 +191,7 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
         name: "Grok / xAI",
         plan: pack.settings?.subscription_tier_display,
         ok: false,
-        error: "No Grok usage data (weekly/monthly empty)",
+        error: "No Grok weekly SuperGrok usage data",
         windows: [],
         fetchedAt: now,
       });
