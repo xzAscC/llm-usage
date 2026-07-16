@@ -23,7 +23,7 @@ No Electron, no cloud account, no global npm install. Just Bun + your existing O
   **Weekly SuperGrok** pool (same meter as the grok.com usage UI)
 - **Claude Code**  
   Session 5h + weekly windows from `api/oauth/usage` (reads `~/.claude/.credentials.json`)
-- **Auto OAuth refresh** for OpenAI & xAI; tokens written back to OpenCode `auth.json`
+- **Auto OAuth refresh** for OpenAI and Claude Code; xAI refresh stays owned by OpenCode to avoid rotating-token races
 - **Local cache only**: `~/.cache/llm-usage/snapshot.json` (percentages — never tokens)
 - **Tests**: `bun test`
 
@@ -106,7 +106,7 @@ OpenCode auth.json  ──►  providers (OpenAI / Z.AI / xAI APIs)
            CLI status     Waybar JSON    Quickshell bar
 ```
 
-OAuth access tokens are refreshed via official endpoints when expired; rotated tokens are saved back into OpenCode’s auth file so the IDE and this tool stay in sync.
+OpenAI and Claude Code access tokens are refreshed through their official endpoints when expired. For xAI, OpenCode remains the sole refresh owner; this tool reloads the rotated access token from OpenCode's auth file instead of consuming the shared refresh token.
 
 ---
 
