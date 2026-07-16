@@ -59,6 +59,87 @@ function grokHeaders(oauth: OAuthCredential): Record<string, string> {
   };
 }
 
+function shortError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("401") || msg.includes("token_expired")) {
+    return "xAI token expired — refresh failed. Run: opencode auth login";
+  }
+  const m = msg.match(/HTTP\s+(\d+)/);
+  if (m) return `HTTP ${m[1]} from Grok billing`;
+  return msg.length > 120 ? msg.slice(0, 120) + "…" : msg;
+}
+
+function windowsFromBilling(
+  weekly: GrokBillingConfig,
+  monthly: GrokBillingConfig,
+): UsageWindow[] {
+  const windows: UsageWindow[] = [];
+
+  const weeklyEnd = weekly.currentPeriod?.end || weekly.billingPeriodEnd;
+  if (weekly.creditUsagePercent != null) {
+    const usedPercent = clampPercent(weekly.creditUsagePercent);
+    const products = (weekly.productUsage || [])
+      .filter((p) => p.product != null && p.usagePercent != null)
+      .map((p) => `${p.product} ${Math.round(p.usagePercent!)}%`)
+      .join(", ");
+    windows.push({
+      id: "weekly",
+      label: periodLabel(weekly.currentPeriod?.type),
+      usedPercent,
+      remainingPercent: clampPercent(100 - usedPercent),
+      resetsAt: weeklyEnd,
+      resetAfterSeconds: secondsUntil(weeklyEnd),
+      note: products || undefined,
+    });
+  } else if (weekly.currentPeriod?.type?.includes("WEEKLY") && weeklyEnd) {
+    windows.push({
+      id: "weekly",
+      label: "Weekly",
+      usedPercent: 0,
+      remainingPercent: 100,
+      resetsAt: weeklyEnd,
+      resetAfterSeconds: secondsUntil(weeklyEnd),
+      note: "no % from API",
+    });
+  }
+
+  const mLimit = monthly.monthlyLimit?.val;
+  const mUsed = monthly.used?.val;
+  if (mLimit != null && mLimit > 0 && mUsed != null) {
+    const usedPercent = clampPercent((mUsed / mLimit) * 100);
+    const end = monthly.billingPeriodEnd;
+    windows.push({
+      id: "monthly",
+      label: "Monthly",
+      usedPercent,
+      remainingPercent: clampPercent(100 - usedPercent),
+      used: mUsed,
+      limit: mLimit,
+      remaining: Math.max(0, mLimit - mUsed),
+      resetsAt: end,
+      resetAfterSeconds: secondsUntil(end),
+      note: `${mUsed}/${mLimit} credits`,
+    });
+  }
+
+  const odCap = (weekly.onDemandCap ?? monthly.onDemandCap)?.val ?? 0;
+  const odUsed = (weekly.onDemandUsed ?? monthly.onDemandUsed)?.val ?? 0;
+  if (odCap > 0) {
+    const usedPercent = clampPercent((odUsed / odCap) * 100);
+    windows.push({
+      id: "ondemand",
+      label: "On-demand",
+      usedPercent,
+      remainingPercent: clampPercent(100 - usedPercent),
+      used: odUsed,
+      limit: odCap,
+      remaining: Math.max(0, odCap - odUsed),
+    });
+  }
+
+  return windows;
+}
+
 export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
   const now = new Date().toISOString();
   let oauth: OAuthCredential | null;
@@ -74,7 +155,7 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
       id: "xai",
       name: "Grok / xAI",
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: shortError(err),
       windows: [],
       fetchedAt: now,
     });
@@ -94,22 +175,26 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
   try {
     const fetchAll = async (token: OAuthCredential) => {
       const headers = grokHeaders(token);
-      return Promise.all([
+      const [weekly, monthly, settings] = await Promise.all([
         fetchJson<GrokBillingResponse>(
           "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
           { headers },
-        ),
+        ).catch(() => ({ config: {} }) as GrokBillingResponse),
+        fetchJson<GrokBillingResponse>(
+          "https://cli-chat-proxy.grok.com/v1/billing",
+          { headers },
+        ).catch(() => ({ config: {} }) as GrokBillingResponse),
         fetchJson<GrokSettingsResponse>(
           "https://cli-chat-proxy.grok.com/v1/settings",
           { headers },
         ).catch(() => null),
-      ] as const);
+      ]);
+      return { weekly, monthly, settings };
     };
 
-    let billing: GrokBillingResponse;
-    let settings: GrokSettingsResponse | null;
+    let pack: Awaited<ReturnType<typeof fetchAll>>;
     try {
-      [billing, settings] = await fetchAll(oauth);
+      pack = await fetchAll(oauth);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (!msg.includes("401") && !msg.includes("token_expired")) throw err;
@@ -121,58 +206,21 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
         true,
       );
       if (!oauth) throw err;
-      [billing, settings] = await fetchAll(oauth);
+      pack = await fetchAll(oauth);
     }
 
-    const cfg = billing.config || {};
-    const windows: UsageWindow[] = [];
-
-    if (cfg.creditUsagePercent != null) {
-      const usedPercent = clampPercent(cfg.creditUsagePercent);
-      const end = cfg.currentPeriod?.end || cfg.billingPeriodEnd;
-      const products = (cfg.productUsage || [])
-        .filter((p) => p.product != null && p.usagePercent != null)
-        .map((p) => `${p.product} ${Math.round(p.usagePercent!)}%`)
-        .join(", ");
-      windows.push({
-        id: "weekly",
-        label: periodLabel(cfg.currentPeriod?.type),
-        usedPercent,
-        remainingPercent: clampPercent(100 - usedPercent),
-        resetsAt: end,
-        resetAfterSeconds: secondsUntil(end),
-        note: products || undefined,
-      });
-    }
-
-    const odCap = cfg.onDemandCap?.val ?? 0;
-    const odUsed = cfg.onDemandUsed?.val ?? 0;
-    if (odCap > 0) {
-      const usedPercent = clampPercent((odUsed / odCap) * 100);
-      windows.push({
-        id: "ondemand",
-        label: "On-demand",
-        usedPercent,
-        remainingPercent: clampPercent(100 - usedPercent),
-        used: odUsed,
-        limit: odCap,
-        remaining: Math.max(0, odCap - odUsed),
-      });
-    } else if (cfg.creditUsagePercent != null) {
-      windows.push({
-        id: "ondemand",
-        label: "Extra credits",
-        note: "US$0 / disabled",
-      });
-    }
+    const windows = windowsFromBilling(
+      pack.weekly.config || {},
+      pack.monthly.config || {},
+    );
 
     if (windows.length === 0) {
       return finalizeProvider({
         id: "xai",
         name: "Grok / xAI",
-        plan: settings?.subscription_tier_display,
+        plan: pack.settings?.subscription_tier_display,
         ok: false,
-        error: "No weekly SuperGrok usage in billing response",
+        error: "No Grok usage data (weekly/monthly empty)",
         windows: [],
         fetchedAt: now,
       });
@@ -181,20 +229,17 @@ export async function fetchXai(auth: AuthFile): Promise<ProviderStatus> {
     return finalizeProvider({
       id: "xai",
       name: "Grok / xAI",
-      plan: settings?.subscription_tier_display,
+      plan: pack.settings?.subscription_tier_display,
       ok: true,
       windows,
       fetchedAt: now,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     return finalizeProvider({
       id: "xai",
       name: "Grok / xAI",
       ok: false,
-      error: msg.includes("401") || msg.includes("token_expired")
-        ? "xAI token expired — refresh failed. Run: opencode auth login"
-        : msg,
+      error: shortError(err),
       windows: [],
       fetchedAt: now,
     });
