@@ -75,10 +75,6 @@ function windowsFromBilling(weekly: GrokBillingConfig): UsageWindow[] {
   const weeklyEnd = weekly.currentPeriod?.end || weekly.billingPeriodEnd;
   if (weekly.creditUsagePercent != null) {
     const usedPercent = clampPercent(weekly.creditUsagePercent);
-    const products = (weekly.productUsage || [])
-      .filter((p) => p.product != null && p.usagePercent != null)
-      .map((p) => `${p.product} ${Math.round(p.usagePercent!)}%`)
-      .join(", ");
     windows.push({
       id: "weekly",
       label: periodLabel(weekly.currentPeriod?.type),
@@ -86,7 +82,6 @@ function windowsFromBilling(weekly: GrokBillingConfig): UsageWindow[] {
       remainingPercent: clampPercent(100 - usedPercent),
       resetsAt: weeklyEnd,
       resetAfterSeconds: secondsUntil(weeklyEnd),
-      note: products || undefined,
     });
   } else if (weekly.currentPeriod?.type?.includes("WEEKLY") && weeklyEnd) {
     windows.push({
