@@ -125,7 +125,7 @@ Item { // Bar content region
                 Layout.alignment: Qt.AlignVCenter
                 Layout.preferredWidth: item ? item.implicitWidth : 0
                 Layout.preferredHeight: item ? item.implicitHeight : 0
-                source: "file:///home/xzascc/Documents/code/LLMUsage/integrations/quickshell/bar/LlmUsageBar.qml"
+                source: "file:///home/YOU/path/to/llm-usage/integrations/quickshell/bar/LlmUsageBar.qml"
             }
 
             Media {

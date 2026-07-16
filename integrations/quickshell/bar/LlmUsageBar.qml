@@ -26,7 +26,7 @@ MouseArea {
     property string lastError: ""
     property string fetchedAt: ""
 
-    readonly property string projectRoot: "/home/xzascc/Documents/code/LLMUsage"
+    readonly property string projectRoot: FileUtils.trimFileProtocol(Qt.resolvedUrl("../../.."))
     readonly property string bunPath: "/usr/bin/bun"
     readonly property string entryPath: projectRoot + "/src/index.ts"
     readonly property string cachePath: FileUtils.trimFileProtocol(Directories.home) + "/.cache/llm-usage/snapshot.json"
