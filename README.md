@@ -152,3 +152,7 @@ MIT
 |-------|---------|
 | `"all"` (default) | List every rate-limit reset credit expiry |
 | `"summary"` | Compact: `4 available · next exp 7/18` |
+
+## TODO
+- [ ] Persist Grok usage data
+- [ ] Display average usage instead of maximum usage
